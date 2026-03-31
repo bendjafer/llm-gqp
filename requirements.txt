@@ -1,0 +1,6 @@
+networkx
+matplotlib
+google-generativeai
+python-dotenv
+groq
+google-genai
