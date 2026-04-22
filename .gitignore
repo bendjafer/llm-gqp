@@ -18,3 +18,5 @@ results/
 *.json
 !plugin.json
 !manifest.json
+*.png
+*.pdf
