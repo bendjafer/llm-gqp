@@ -1,6 +1,7 @@
-import os
 import json
+import os
 import difflib
+import tempfile
 from tqdm import tqdm
 from descriptors import DESCRIPTORS
 
@@ -18,9 +19,21 @@ class Corpus:
             return json.load(f)
 
     def _write_file(self):
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2, ensure_ascii=False)
+        """Atomic write: dump to a sibling .tmp file, then rename.
+
+        A crash or KeyboardInterrupt mid-write leaves the .tmp file behind
+        rather than a half-written, corrupt JSON.
+        """
+        dir_ = os.path.dirname(self.path) or "."
+        os.makedirs(dir_, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2, ensure_ascii=True)
+            os.replace(tmp_path, self.path)  # atomic on POSIX
+        except Exception:
+            os.unlink(tmp_path)              # clean up on failure
+            raise
 
     def _missing(self, graphs, descriptor_names):
         return {
@@ -74,7 +87,7 @@ class Corpus:
                 fmt_bar = tqdm(descriptor_names, desc=f"  {name}", unit="fmt", leave=False)
                 for fmt in fmt_bar:
                     fmt_bar.set_postfix(fmt=fmt)
-                    new_formats[fmt] = DESCRIPTORS[fmt](G, name=name)
+                    new_formats[fmt] = DESCRIPTORS[fmt](G)
                 if name not in self._data:
                     self._data[name] = new_formats
                 else:

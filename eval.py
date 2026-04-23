@@ -1,4 +1,5 @@
 import ast
+import os
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -6,14 +7,15 @@ import pandas as pd
 import seaborn as sns
 
 
-FLOAT_TOLERANCE = 1e-3
+FLOAT_TOLERANCE = 1e-2  # raised from 1e-3: LLMs round to 4 decimal places
 
 
 def compute_ground_truth(G, problem):
     """Compute the correct answer for a NetworkX graph G and problem name."""
     nodes = list(G.nodes())
     first_node = nodes[0]
-    last_node = nodes[-1]
+    last_node  = nodes[-1]
+    directed   = G.is_directed()
 
     match problem:
         case "node_count":
@@ -21,20 +23,28 @@ def compute_ground_truth(G, problem):
         case "edge_count":
             return G.number_of_edges()
         case "neighbors":
-            return sorted(list(G.neighbors(first_node)), key=str)
+            nbrs = list(G.successors(first_node)) if directed else list(G.neighbors(first_node))
+            return sorted(nbrs, key=str)
         case "degree":
             return G.degree(first_node)
         case "shortest_path":
+            if not nx.has_path(G, first_node, last_node):
+                return None
             return nx.shortest_path(G, first_node, last_node)
         case "clustering":
             return round(nx.clustering(G, first_node), 4)
         case "diameter":
+            gate = nx.is_strongly_connected(G) if directed else nx.is_connected(G)
+            if not gate:
+                return None
             return nx.diameter(G)
         case "density":
             return round(nx.density(G), 4)
         case "is_connected":
-            return nx.is_connected(G)
+            return nx.is_weakly_connected(G) if directed else nx.is_connected(G)
         case "cycle":
+            if directed:
+                return any(nx.simple_cycles(G))  # short-circuits at first cycle found
             return len(nx.cycle_basis(G)) > 0
         case _:
             return None
@@ -135,7 +145,12 @@ def _answers_match(answer, ground_truth, problem):
 
         case "density" | "clustering":
             try:
-                return bool(abs(float(answer) - float(ground_truth)) <= FLOAT_TOLERANCE)
+                # Round both sides to 4 d.p. before comparing so LLM rounding
+                # conventions don't count as errors.
+                return bool(
+                    abs(round(float(answer), 4) - round(float(ground_truth), 4))
+                    <= FLOAT_TOLERANCE
+                )
             except (TypeError, ValueError):
                 return False
 
@@ -214,7 +229,9 @@ def full_report(df):
     print(f"Total rows : {n_total}")
     print(f"Correct answers : {int(n_correct)}")
     print(f"Unparseable answers : {int(n_none)}")
-    print(f"Overall accuracy : {100 * n_correct / (n_total - n_none):.2f}% (excl. unparseable)")
+    scoreable = n_total - n_none
+    overall = f"{100 * n_correct / scoreable:.2f}%" if scoreable else "N/A (all unparseable)"
+    print(f"Overall accuracy : {overall} (excl. unparseable)")
     print()
 
     for dim, label in [
@@ -337,3 +354,30 @@ def plot_confusion_per_problem(df, problem, ax=None):
     ax.set_xlabel("Ground truth")
     ax.set_ylabel("LLM answer")
     return ax
+
+
+def save_eval_plots(df, plots_dir):
+    """Generate and save all standard evaluation plots to plots_dir."""
+    os.makedirs(plots_dir, exist_ok=True)  # os imported at module level
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    plot_accuracy_bar(df, "problem",    "Accuracy by Problem", ax=axes[0], color="#5c85d6")
+    plot_accuracy_bar(df, "format",     "Accuracy by Format",  ax=axes[1], color="#d67c5c")
+    plot_accuracy_bar(df, "graph_name", "Accuracy by Graph",   ax=axes[2], color="#5cb85c")
+    plt.suptitle("LLM Graph Understanding — Accuracy Breakdown", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, "accuracy_bars.png"), dpi=150)
+    plt.close()
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    plot_heatmap(df, row_col="problem", col_col="format",
+                 title="Accuracy (%) — Problem × Format", ax=ax)
+    plt.savefig(os.path.join(plots_dir, "heatmap_problem_format.png"), dpi=150)
+    plt.close()
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plot_error_distribution(df, ax=ax)
+    plt.savefig(os.path.join(plots_dir, "error_distribution.png"), dpi=150)
+    plt.close()
+
+    print(f"[INFO] Plots saved → {plots_dir}")
