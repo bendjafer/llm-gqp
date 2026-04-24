@@ -1,30 +1,20 @@
-networkx
-matplotlib
-google-generativeai
-python-dotenv
-groq
-google-genai
-seaborn
-ollama==0.6.0
-langchain==1.0.2 
-langchain-core==1.0.1 
-langgraph==1.0.1 
-langgraph-checkpoint==3.0.0 
-langgraph-prebuilt==1.0.1 
-langsmith==0.4.38
-langchain-classic==1.0.0 
-langchain-text-splitters==1.0.0 
-langchain_community==0.4
-langchain-ollama
-langchain-openai
-langchain-groq
-langchain-google-genai
-tqdm==4.67.1
-unstructured==0.18.15
-langchain-chroma
-py2neo
-pandas
-langchain_neo4j
-streamlit
-fastapi
-scikit-learn
+# Graph & Data processing
+networkx>=3.0
+pandas>=2.0.0
+
+# Visualization & Metrics
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scikit-learn>=1.2.0
+
+# LLM Framework & Providers
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-ollama>=0.1.0
+langchain-openai>=0.1.0
+langchain-groq>=0.1.0
+langchain-google-genai>=1.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.65.0
