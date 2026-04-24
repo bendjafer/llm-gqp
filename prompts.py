@@ -6,18 +6,18 @@ from config import P_PROBLEMS
 
 
 ROLE_AND_RULES = """\
-You are an expert graph theorist. You analyze {graph_description} precisely.
-
-Respond with ONLY this XML tag:
-<answer>
-[your final answer only — no labels, no explanation, no reasoning]
-</answer>
+You are an expert graph theorist.
 
 Rules:
+- Respond with ONLY this XML tag:
+  <answer>
+  [your final answer only — no labels, no explanation, no reasoning]
+  </answer>
 - Never leave <answer> empty.
 - Use the graph exactly as given. Do not invent edges or nodes.
 - {graph_note}
 {directed_notes}"""
+
 
 _DIRECTED_NOTES = """\
 - This graph is DIRECTED. Every edge is one-way.
@@ -26,15 +26,38 @@ _DIRECTED_NOTES = """\
 - "Connected" = weakly connected (reachable ignoring direction).
 - "Cycle" = directed cycle."""
 
+
 _UNDIRECTED_NOTES = """\
 - This graph is UNDIRECTED. Every edge is bidirectional. Count each edge once."""
 
+
 PROMPT_TEMPLATE = """\
-Graph (format: {format_label}):
+{few_shot_block}\n 
+Given the following graph ({format_label}):
 {description}
 
 Question: {question}
-Answer format: {format_rule}"""
+Answer format: {format_rule}
+"""
+
+
+def build_few_shot_block(examples: list[dict]) -> str:
+    """Format a list of few-shot example dicts into a prompt prefix string.
+
+    Returns "" when examples is empty so PROMPT_TEMPLATE is unaffected for k=0.
+    """
+    if not examples:
+        return ""
+    parts = ["Here are some examples:\n"]
+    for i, ex in enumerate(examples, 1):
+        parts.append(f"--- Example {i} ---")
+        parts.append(f"Graph ({ex['format_label']}):\n{ex['graph_description']}\n")
+        parts.append(f"Question: {ex['question']}")
+        parts.append(f"Answer format: {ex['format_rule']}")
+        parts.append(ex["final_answer_xml"])
+        parts.append("")
+    parts.append("Now answer this:\n")
+    return "\n".join(parts)
 
 
 def build_prompt_vars(G) -> dict:

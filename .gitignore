@@ -15,8 +15,9 @@ __pycache__/
 # Project Results
 results/
 *.pkl
-*.json
 !plugin.json
 !manifest.json
 *.png
 *.pdf
+CLAUDE.md
+.claude/

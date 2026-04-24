@@ -8,15 +8,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$SCRIPT_DIR/.env" ]] && set -a && source "$SCRIPT_DIR/.env" && set +a
 
+# Automatically activate the virtual environment if it exists.
+if [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+    source "$SCRIPT_DIR/.venv/bin/activate"
+fi
+
 # ── Graph configurations (2 combinations) ────────────────────────────────────
 # Each entry: "directed_flag|weighted_flag|dir_label|wt_label"
 GRAPH_CONFIGS=(
-    " | |undirected|unweighted"      # Default case
-    "--gen-directed| |directed|unweighted"  # Directed case
+    " | |undirected|unweighted"
+    " |--gen-weighted|undirected|weighted"
+    "--gen-directed| |directed|unweighted"
+    "--gen-directed|--gen-weighted|directed|weighted"
 )
 
-SEED=42
-SIZE="medium"
+SEED=1
+SIZE="small"
+SHOTS=(0 2)
 
 # ── Models — cloud providers first, Ollama last ───────────────────────────────
 declare -A PROVIDER_OF
@@ -35,13 +43,11 @@ GROQ_MODELS=("llama-3.3-70b-versatile")
 for m in "${GROQ_MODELS[@]}"; do PROVIDER_OF[$m]="groq";      ENV_KEY_OF[$m]="GROQ_API_KEY2";    done
 
 # Ollama  (local — checked last)
-OLLAMA_MODELS=("llama3.1:8b")
+OLLAMA_MODELS=("llama3.1:8b" "graphwalker:latest")
 for m in "${OLLAMA_MODELS[@]}"; do PROVIDER_OF[$m]="ollama";  ENV_KEY_OF[$m]="";                 done
 
 ALL_MODELS=(
     "${OPENAI_MODELS[@]}"
-    "${GEMINI_MODELS[@]}"
-    "${GROQ_MODELS[@]}"
     "${OLLAMA_MODELS[@]}"
 )
 
@@ -54,8 +60,9 @@ graph_name() {
 safe_model() { echo "${1//:/_}"; }
 
 csv_path() {
-    # csv_path <graph_name> <model>
+    # csv_path <graph_name> <model> <shots>
     local safe; safe=$(safe_model "$2")
+    safe="${safe}_${3}shot"
     echo "results/${1}/${safe}/${safe}.csv"
 }
 
@@ -71,22 +78,23 @@ skipped=()
 failed=()
 
 # ── Main sweep ────────────────────────────────────────────────────────────────
-for cfg in "${GRAPH_CONFIGS[@]}"; do
-    IFS="|" read -r dir_flag wt_flag dir_label wt_label <<< "$cfg"
-    dir_flag="${dir_flag// /}"   # trim
-    wt_flag="${wt_flag// /}"
-    gname=$(graph_name "$dir_label" "$wt_label")
+for shots in "${SHOTS[@]}"; do
+    for cfg in "${GRAPH_CONFIGS[@]}"; do
+        IFS="|" read -r dir_flag wt_flag dir_label wt_label <<< "$cfg"
+        dir_flag="${dir_flag// /}"   # trim
+        wt_flag="${wt_flag// /}"
+        gname=$(graph_name "$dir_label" "$wt_label")
 
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  Graph: ${gname}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Graph: ${gname}  |  Shots: ${shots}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    for model in "${ALL_MODELS[@]}"; do
-        provider="${PROVIDER_OF[$model]}"
-        env_key="${ENV_KEY_OF[$model]}"
-        csv=$(csv_path "$gname" "$model")
-        label="${model}  [${provider}]  graph=${gname}"
+        for model in "${ALL_MODELS[@]}"; do
+            provider="${PROVIDER_OF[$model]}"
+            env_key="${ENV_KEY_OF[$model]}"
+            csv=$(csv_path "$gname" "$model" "$shots")
+            label="${model}  [${provider}]  shots=${shots}  graph=${gname}"
 
         # Skip: output already exists.
         if [[ -f "$csv" ]]; then
@@ -119,6 +127,8 @@ for cfg in "${GRAPH_CONFIGS[@]}"; do
             --gen-size  "$SIZE"
             --gen-seed  "$SEED"
             --model     "$model"
+            --descriptors adjacency_list edge_list gml l2sp_paths random_walk
+            --few-shot-k "$shots"
         )
         [[ -n "$dir_flag" ]] && cmd+=("$dir_flag")
         [[ -n "$wt_flag"  ]] && cmd+=("$wt_flag")
@@ -131,6 +141,7 @@ for cfg in "${GRAPH_CONFIGS[@]}"; do
             echo "[FAIL] $label"
         fi
     done
+  done
 done
 
 # ── Summary ───────────────────────────────────────────────────────────────────

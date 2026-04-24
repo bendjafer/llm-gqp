@@ -12,6 +12,7 @@ from eval import add_correctness, add_ground_truth
 from prompts import (
     PROMPT_TEMPLATE,
     ROLE_AND_RULES,
+    build_few_shot_block,
     build_prompt_vars,
     get_question,
     is_valid_problem,
@@ -73,6 +74,23 @@ def _detect_provider(model: str) -> str:
     return "ollama"
 
 
+# ── Few-shot helpers ──────────────────────────────────────────────────────────
+
+def _select_examples(index: dict, problem: str, descriptor: str, k: int) -> list:
+    """Return up to k examples for (problem, descriptor), falling back to problem-only."""
+    exact = index.get((problem, descriptor), [])
+    if len(exact) >= k:
+        return exact[:k]
+    # Fallback: same problem, any other descriptor — no duplicates.
+    fallback = [
+        ex
+        for (p, d), exs in index.items()
+        if p == problem and d != descriptor
+        for ex in exs
+    ]
+    return (exact + fallback)[:k]
+
+
 # ── LLM ───────────────────────────────────────────────────────────────────────
 
 class LLM:
@@ -83,7 +101,13 @@ class LLM:
     Adding a new provider requires only a factory function and a registry entry.
     """
 
-    def __init__(self, model: str | None = None, run_dir: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        run_dir: str | None = None,
+        few_shot_k: int = 0,
+        few_shots: list | None = None,
+    ):
         raw_model        = model or OLLAMA_MODEL
         provider         = _detect_provider(raw_model)
         factory, env_key = _REGISTRY[provider]
@@ -98,6 +122,7 @@ class LLM:
         self.chat_model = factory(raw_model)
 
         safe_model    = raw_model.replace(":", "_").replace("/", "_")
+        safe_model    = f"{safe_model}_{few_shot_k}shot"
         self.prompt   = ChatPromptTemplate([
             ("system", ROLE_AND_RULES),
             ("human",  PROMPT_TEMPLATE),
@@ -108,8 +133,15 @@ class LLM:
             run_dir = os.path.join("results", safe_model)
         os.makedirs(run_dir, exist_ok=True)
 
-        self.run_dir   = run_dir
-        self.save_path = os.path.join(run_dir, f"{safe_model}.csv")
+        self.run_dir      = run_dir
+        self.save_path    = os.path.join(run_dir, f"{safe_model}.csv")
+        self.few_shot_k   = few_shot_k
+        # Build (problem, descriptor) -> [examples] index for O(1) lookup.
+        self._few_shot_index: dict[tuple, list] = {}
+        if few_shots and few_shot_k > 0:
+            for ex in few_shots:
+                key = (ex["problem"], ex["descriptor"])
+                self._few_shot_index.setdefault(key, []).append(ex)
 
     def generate_answers(
         self,
@@ -167,15 +199,21 @@ class LLM:
         for graph_name, gdl_format, gdl_content, p_problem, question, fmt in progress:
             progress.set_postfix(graph=graph_name, fmt=gdl_format, problem=p_problem)
 
-            graph_obj   = graphs.get(graph_name)
-            prompt_vars = build_prompt_vars(graph_obj)
+            graph_obj      = graphs.get(graph_name)
+            prompt_vars    = build_prompt_vars(graph_obj)
+            few_shot_block = ""
+            if self.few_shot_k > 0:
+                few_shot_block = build_few_shot_block(
+                    _select_examples(self._few_shot_index, p_problem, gdl_format, self.few_shot_k)
+                )
 
             try:
                 llm_response = self.pipeline.invoke({
-                    "description":  gdl_content,
-                    "format_label": gdl_format,
-                    "question":     question,
-                    "format_rule":  fmt,
+                    "description":    gdl_content,
+                    "format_label":   gdl_format,
+                    "question":       question,
+                    "format_rule":    fmt,
+                    "few_shot_block": few_shot_block,
                     **prompt_vars,
                 })
                 answer = parse_response(llm_response)

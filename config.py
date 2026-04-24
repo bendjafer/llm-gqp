@@ -28,6 +28,7 @@ class Problem(NamedTuple):
     question:          str            # undirected (or shared) phrasing
     directed_question: str | None     # directed-specific; None = same as question
     format_rule:       str            # expected answer format
+    few_shot_k:        int = 0        # per-problem default; 0 = disabled
 
 P_PROBLEMS: dict[str, Problem] = {
     "node_count":    Problem("How many nodes does this graph have?",                         None,                                                         "integer only"),

@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 
@@ -19,8 +20,9 @@ def _graph_dir(graph_names: list) -> str:
     label = graph_names[0] if len(graph_names) == 1 else "+".join(sorted(graph_names))
     return os.path.join("results", label)
 
-def _run_dir(graph_names: list, model_name: str) -> str:
+def _run_dir(graph_names: list, model_name: str, few_shot_k: int = 0) -> str:
     safe = model_name.replace(":", "_").replace("/", "_")
+    safe = f"{safe}_{few_shot_k}shot"
     return os.path.join(_graph_dir(graph_names), safe)
 
 def _corpus_path(graph_names: list) -> str:
@@ -65,6 +67,14 @@ def parse_args():
     ))
     parser.add_argument("--corpus-path", default=None,
         help="Override path to descriptor cache JSON. Auto-derived from graph names if omitted.")
+
+    parser.add_argument("--few-shot-k", type=int, default=0,
+        help="Number of few-shot examples injected per question (default: 0 = disabled). "
+             "Run generate_few_shots.py first to create the examples file.")
+    parser.add_argument("--few-shot-file", default=None,
+        help="Path to few-shot JSON. If omitted, auto-resolves to few_shots/few_shots_small.json.")
+    parser.add_argument("--show-prompt", action="store_true",
+        help="Print the underlying prompt template to the console before running.")
 
     return parser.parse_args()
 
@@ -150,7 +160,7 @@ def main():
         print(f"[INFO] --descriptors not specified. Using all: {descriptor_names}")
 
     graph_dir   = _graph_dir(graph_names)
-    run_dir     = _run_dir(graph_names, model_name)
+    run_dir     = _run_dir(graph_names, model_name, args.few_shot_k)
     corpus_path = args.corpus_path or _corpus_path(graph_names)
 
     os.makedirs(graph_dir, exist_ok=True)
@@ -163,9 +173,29 @@ def main():
         print("Run 'ollama list' to see installed models, or 'ollama pull <model>' to fetch it.")
         sys.exit(1)
 
+    few_shots = None
+    if args.few_shot_k > 0:
+        few_shot_path = args.few_shot_file or "few_shots/few_shots_small.json"
+        if not os.path.exists(few_shot_path):
+            print(f"[ERROR] few-shot file '{few_shot_path}' not found. "
+                  "Run 'python generate_few_shots.py --size small' first.")
+            sys.exit(1)
+        with open(few_shot_path, encoding="utf-8") as f:
+            few_shots = json.load(f)
+        print(f"[INFO] Loaded {len(few_shots)} few-shot examples from {few_shot_path} "
+              f"(k={args.few_shot_k})")
+
     try:
         corpus = ensure_corpus(graphs, descriptor_names, corpus_path)
-        llm    = LLM(model=model_name, run_dir=run_dir)
+        llm    = LLM(model=model_name, run_dir=run_dir,
+                     few_shot_k=args.few_shot_k, few_shots=few_shots)
+
+        if args.show_prompt:
+            print("\n" + "━"*80)
+            print("  PROMPT TEMPLATE")
+            print("━"*80)
+            llm.view_prompt()
+            print("━"*80 + "\n")
 
         df = llm.generate_answers(
             corpus,
